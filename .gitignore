@@ -1,3 +1,7 @@
+.DS_Store
 VM/bin/
 VM/obj/
 .idea/
+Core/.pio
+Core/.vscode/
+
