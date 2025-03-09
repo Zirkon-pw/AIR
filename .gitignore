@@ -2,6 +2,7 @@
 VM/bin/
 VM/obj/
 .idea/
+Lang/AirLang
 Core/.pio
 Core/.vscode/
-
+Example/bin/
