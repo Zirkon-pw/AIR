@@ -56,17 +56,16 @@ typedef enum {
     OP_FILE_SEEK = 0x74
 } Opcode;
 
-// Структура виртуальной машины
 typedef struct {
     uint8_t *memory;         // Динамически выделяемая память для кода и данных
     uint32_t memory_size;    // Текущий размер памяти
+    uint32_t program_size;      // Размер секции кода
     uint32_t registers[NUM_REGS];  // Регистры R0-R31
     uint32_t stack[STACK_SIZE];    // Стек
     uint32_t sp;                   // Указатель стека
     uint32_t ip;                   // Указатель инструкций
     uint8_t flags;                 // Флаги (0x01: равно, 0x02: меньше, 0x04: больше)
     int running;                   // Флаг выполнения
-    uint32_t program_size;         // Размер загруженного кода
     int debug;                     // Режим отладки
     FILE *files[MAX_FILES];        // Таблица открытых файлов
 } VM;
@@ -551,7 +550,7 @@ void op_file_open(VM *vm) {
     char *fname = (char *)&vm->memory[fname_addr];
     char *mode = (char *)&vm->memory[mode_addr];
     FILE *fp = NULL;
-    
+
     // Если имя соответствует стандартным потокам, используем их
     if (strcmp(fname, "stdin") == 0) {
         vm->registers[dest_reg] = 0; // дескриптор для stdin
@@ -565,12 +564,12 @@ void op_file_open(VM *vm) {
     } else {
         fp = fopen(fname, mode);
     }
-    
+
     if (!fp) {
         vm->registers[dest_reg] = (uint32_t)(-1);
         return;
     }
-    
+
     // Ищем свободное место, начиная с 3 (так как 0-2 заняты стандартными потоками)
     int slot = -1;
     for (int i = 3; i < MAX_FILES; i++) {
@@ -719,6 +718,21 @@ void init_dispatch_table(instruction_fn table[256]) {
     table[OP_FILE_SEEK] = op_file_seek;
 }
 
+// void vm_run(VM *vm) {
+//     instruction_fn dispatch[256];
+//     init_dispatch_table(dispatch);
+//     while (vm->running) {
+//         if (vm->ip >= vm->program_size)
+//             break;
+//         uint8_t opcode = read_byte(vm);
+//         if (dispatch[opcode])
+//             dispatch[opcode](vm);
+//         else
+//             vm_errorf(vm, "Unknown opcode: 0x%02x at IP: %u", opcode, vm->ip - 1);
+//         if (vm->debug)
+//             vm_print_debug_state(vm);
+//     }
+// }
 void vm_run(VM *vm) {
     instruction_fn dispatch[256];
     init_dispatch_table(dispatch);
@@ -726,10 +740,15 @@ void vm_run(VM *vm) {
         if (vm->ip >= vm->program_size)
             break;
         uint8_t opcode = read_byte(vm);
-        if (dispatch[opcode])
+        if (dispatch[opcode]) {
             dispatch[opcode](vm);
-        else
+        } else if (opcode == 0xFF) {
+            // Если встречаем 0xFF (часто используется как заполнитель),
+            // считаем, что достигнут конец исполняемого кода.
+            vm->running = 0;
+        } else {
             vm_errorf(vm, "Unknown opcode: 0x%02x at IP: %u", opcode, vm->ip - 1);
+        }
         if (vm->debug)
             vm_print_debug_state(vm);
     }
@@ -802,4 +821,3 @@ int main(int argc, char *argv[]) {
     free(vm.memory);
     return 0;
 }
-
