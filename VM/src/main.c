@@ -189,11 +189,12 @@ void op_call(VM *vm) {
 
 void op_ret(VM *vm) {
     if (vm->sp == 0) {
-        vm_error(vm, "Stack underflow in RET");
+        vm->running = 0;
         return;
     }
     vm->ip = vm->stack[--vm->sp];
 }
+
 
 void op_if(VM *vm) {
     uint8_t flag_mask = read_byte(vm);
