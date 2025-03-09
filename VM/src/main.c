@@ -532,7 +532,6 @@ void op_restore(VM *vm) {
     printf("Snapshot restored from snapshot.bin\n");
 }
 
-// Инструкции для работы с файлами
 void op_file_open(VM *vm) {
     // Ожидаем: OPEN reg_fname, reg_mode, dest_reg
     uint8_t reg_fname = read_byte(vm);
@@ -550,13 +549,30 @@ void op_file_open(VM *vm) {
     }
     char *fname = (char *)&vm->memory[fname_addr];
     char *mode = (char *)&vm->memory[mode_addr];
-    FILE *fp = fopen(fname, mode);
+    FILE *fp = NULL;
+    
+    // Если имя соответствует стандартным потокам, используем их
+    if (strcmp(fname, "stdin") == 0) {
+        vm->registers[dest_reg] = 0; // дескриптор для stdin
+        return;
+    } else if (strcmp(fname, "stdout") == 0) {
+        vm->registers[dest_reg] = 1; // дескриптор для stdout
+        return;
+    } else if (strcmp(fname, "stderr") == 0) {
+        vm->registers[dest_reg] = 2; // дескриптор для stderr
+        return;
+    } else {
+        fp = fopen(fname, mode);
+    }
+    
     if (!fp) {
         vm->registers[dest_reg] = (uint32_t)(-1);
         return;
     }
+    
+    // Ищем свободное место, начиная с 3 (так как 0-2 заняты стандартными потоками)
     int slot = -1;
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 3; i < MAX_FILES; i++) {
         if (vm->files[i] == NULL) {
             slot = i;
             break;
@@ -735,10 +751,15 @@ void vm_init(VM *vm) {
     vm->running = 1;
     vm->program_size = 0;
     vm->debug = 0;
-    for (int i = 0; i < MAX_FILES; i++) {
+    // Инициализация стандартных потоков
+    vm->files[0] = stdin;
+    vm->files[1] = stdout;
+    vm->files[2] = stderr;
+    for (int i = 3; i < MAX_FILES; i++) {
         vm->files[i] = NULL;
     }
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
