@@ -194,7 +194,7 @@
 2. **Компиляция:**
 
    ```bash
-   go build -o asm-compiler main.go
+   go build -o AirLang main.go
    ```
 
 ### Запуск компилятора
@@ -206,13 +206,13 @@
 Пример запуска:
 
 ```bash
-./asm-compiler input.asm output.bin
+./AirLang input.asm output.bin
 ```
 
 При неверном количестве аргументов программа выводит сообщение с правильным синтаксисом:
 
 ```
-Использование: asm-compiler [input.asm] [output.bin]
+Использование: AirLang [input.asm] [output.bin]
 ```
 
 ### Пример ассемблерного файла
