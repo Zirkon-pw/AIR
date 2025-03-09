@@ -374,12 +374,15 @@ void op_cmp(VM *vm) {
     vm->ip += 4;
     uint32_t a = vm->registers[reg1];
     vm->flags = 0;
-    if (a == (uint32_t)imm)
-        vm->flags |= 0x01;
-    else if (a < (uint32_t)imm)
-        vm->flags |= 0x02;
-    else
-        vm->flags |= 0x04;
+    if (a == (uint32_t)imm) {
+        vm->flags |= 0x01;  // EQ
+    } else {
+        vm->flags |= 0x02;  // NE
+        if (a < (uint32_t)imm)
+            vm->flags |= 0x04;  // LT
+        else
+            vm->flags |= 0x08;  // GT (GE - синоним GT)
+    }
 }
 
 void op_fs_list(VM *vm) {
