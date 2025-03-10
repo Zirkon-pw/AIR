@@ -33,36 +33,43 @@ jobs:
       with:
         go-version: '1.20'
 
-    # 3. Сборка C-проекта (AirVM)
+    # 3. Установка зависимостей для C-проекта (только для Linux)
+    - name: Install C dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+
+    # 4. Сборка C-проекта (AirVM) только на Linux
     - name: Build C project (AirVM)
-      if: matrix.os == 'ubuntu-latest' # Пример для Linux
+      if: matrix.os == 'ubuntu-latest'
       run: |
         cd VM
         make clean
         make all
 
-    # 4. Сборка Go-проекта (AirLang)
+    # 5. Сборка Go-проекта (AirLang)
     - name: Build Go project
       run: |
         cd Lang
         GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
-    # 5. Создание директории для артефактов
+    # 6. Создание директории для артефактов
     - name: Create artifacts directory
       run: mkdir -p artifacts
 
-    # 6. Копирование бинарных файлов
+    # 7. Копирование бинарных файлов
     - name: Copy binaries to artifacts
       run: |
-        cp VM/bin/AirVM artifacts/AirVM${{ matrix.ext }} || true
+        cp VM/bin/AirVM artifacts/AirVM || true
         cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
 
-    # 7. Публикация релиза
+    # 8. Публикация релиза
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          artifacts/AirVM${{ matrix.ext }}
+          artifacts/AirVM
           artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
