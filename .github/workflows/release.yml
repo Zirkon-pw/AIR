@@ -47,7 +47,6 @@ jobs:
 
       - name: Copy Core firmware to artifacts
         run: |
-          # По умолчанию PlatformIO кладёт бинарник в .pio/build/<env>/firmware.bin
           CORE_BIN=$(find Core/.pio/build -type f -name "firmware.bin" | head -n 1)
           if [ -n "$CORE_BIN" ]; then
             cp "$CORE_BIN" artifacts/AirCore.bin
@@ -135,6 +134,10 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/**
+            artifacts/AirVM
+            artifacts/AirCore.bin
+            artifacts/AirLang_linux
+            artifacts/AirLang_windows
+            artifacts/AirLang_darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
