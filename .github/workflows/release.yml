@@ -1,15 +1,26 @@
-name: Release Go and C Projects
+name: Release Cross-Platform Binaries
 
 on:
   push:
     tags:
-      - 'v*' # Триггерится при создании тега, начинающегося с "v"
+      - 'v*'
     branches:
-      - master # Запускается только из ветки master
+      - master
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        goos: [linux, windows, darwin]
+        include:
+          - os: ubuntu-latest
+            ext: ""
+          - os: windows-latest
+            ext: ".exe"
+          - os: macos-latest
+            ext: ""
 
     steps:
     # 1. Checkout кода
@@ -20,37 +31,38 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.20' # Укажите нужную версию Go
+        go-version: '1.20'
 
-    # 3. Сборка Go-проекта
+    # 3. Сборка C-проекта (AirVM)
+    - name: Build C project (AirVM)
+      if: matrix.os == 'ubuntu-latest' # Пример для Linux
+      run: |
+        cd VM
+        make clean
+        make all
+
+    # 4. Сборка Go-проекта
     - name: Build Go project
       run: |
-        cd go
-        go build -o ../artifacts/my_go_program main.go
-
-    # 4. Сборка C-проекта
-    - name: Build C project
-      run: |
-        cd c
-        make
-        mv my_c_program ../artifacts/
+        cd Lang
+        GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
     # 5. Создание директории для артефактов
     - name: Create artifacts directory
       run: mkdir -p artifacts
 
-    # 6. Архивация исполняемых файлов
-    - name: Archive binaries
+    # 6. Копирование бинарных файлов
+    - name: Copy binaries to artifacts
       run: |
-        tar -czf artifacts/go_project.tar.gz -C artifacts my_go_program
-        tar -czf artifacts/c_project.tar.gz -C artifacts my_c_program
+        cp VM/bin/AirVM artifacts/AirVM${{ matrix.ext }} || true
+        cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
 
     # 7. Публикация релиза
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          artifacts/go_project.tar.gz
-          artifacts/c_project.tar.gz
+          artifacts/AirVM${{ matrix.ext }}
+          artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
