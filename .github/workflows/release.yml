@@ -38,18 +38,27 @@ jobs:
           cache: true
 
       - name: Build AirVM
+        shell: bash
         run: |
           cd VM
           make clean
           make all
-        shell: bash
 
       - name: Create artifacts directory
+        shell: bash
         run: mkdir -p artifacts
 
       - name: Copy AirVM binary to artifacts
+        shell: bash
         run: |
-          cp VM/bin/AirVM artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }} || { echo "AirVM binary not found"; exit 1; }
+          if [ -f "VM/bin/AirVM" ]; then
+            cp VM/bin/AirVM artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
+          elif [ -f "VM/bin/AirVM.exe" ]; then
+            cp VM/bin/AirVM.exe artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
+          else
+            echo "AirVM binary not found"
+            exit 1
+          fi
 
       - name: Upload AirVM artifact
         uses: actions/upload-artifact@v4
@@ -194,4 +203,4 @@ jobs:
             artifacts/AirLang_windows.exe
             artifacts/AirLang_darwin
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
