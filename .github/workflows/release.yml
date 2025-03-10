@@ -5,11 +5,14 @@ on:
     tags:
       - 'v*'  # Запуск при создании тега, начинающегося с "v"
 
+permissions:
+  contents: write  # Добавляем разрешения на запись в репозиторий
+
 jobs:
   build-and-release:
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false  # Не отменять остальные проверки при ошибке
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         goos: [linux, windows, darwin]
@@ -21,24 +24,20 @@ jobs:
           - os: macos-latest
             ext: ""
     steps:
-      # 1. Клонирование репозитория
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. Установка Go
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
 
-      # 3. Установка зависимостей (только для Linux)
       - name: Install C dependencies (Linux only)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
 
-      # 4. Сборка C-проекта (AirVM) на Linux
       - name: Build C project (AirVM)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -46,27 +45,22 @@ jobs:
           make clean
           make all
 
-      # 5. Сборка Go-проекта (AirLang)
       - name: Build Go project (AirLang)
         run: |
           cd Lang
           GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
-      # 6. Создание директории для артефактов
       - name: Create artifacts directory
         run: mkdir -p artifacts
 
-      # 7. Копирование бинарных файлов
       - name: Copy binaries to artifacts
         run: |
           cp VM/bin/AirVM artifacts/AirVM || true
           cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
 
-      # 8. Проверка содержимого артефактов перед публикацией
       - name: List artifacts
         run: ls -lh artifacts/
 
-      # 9. Публикация релиза
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
