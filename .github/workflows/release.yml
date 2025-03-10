@@ -3,10 +3,10 @@ name: Release Cross-Platform Binaries
 on:
   push:
     tags:
-      - 'v*'  
+      - 'v*'
 
 permissions:
-  contents: write  # Разрешение на запись (необходимо для создания релиза)
+  contents: write  # Needed for creating a release
 
 jobs:
   build-and-release:
@@ -23,7 +23,6 @@ jobs:
             ext: ".exe"
           - os: macos-latest
             ext: ""
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -47,11 +46,12 @@ jobs:
           make all
 
       - name: Build Go project (AirLang)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
         run: |
           cd Lang
-          $Env:GOOS="darwin"
-          $Env:GOARCH="amd64"
-          GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
+          go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
       - name: Create artifacts directory
         run: mkdir -p artifacts
