@@ -59,12 +59,12 @@ typedef enum {
 typedef struct {
     uint8_t *memory;         // Динамически выделяемая память для кода и данных
     uint32_t memory_size;    // Текущий размер памяти
-    uint32_t program_size;      // Размер секции кода
+    uint32_t program_size;   // Размер секции кода
     uint32_t registers[NUM_REGS];  // Регистры R0-R31
     uint32_t stack[STACK_SIZE];    // Стек
     uint32_t sp;                   // Указатель стека
     uint32_t ip;                   // Указатель инструкций
-    uint8_t flags;                 // Флаги (0x01: равно, 0x02: меньше, 0x04: больше)
+    uint8_t flags;                 // Флаги: 0x01: EQ, 0x02: NE, 0x04: LT, 0x08: GT (GE)
     int running;                   // Флаг выполнения
     int debug;                     // Режим отладки
     FILE *files[MAX_FILES];        // Таблица открытых файлов
@@ -147,6 +147,28 @@ uint8_t read_byte(VM *vm) {
     return vm->memory[vm->ip++];
 }
 
+// Функция для считывания адресного операнда.
+// Если следующий байт равен 0xFF, то это указание на косвенную адресацию:
+// считывается байт с номером регистра, и возвращается значение этого регистра.
+// Иначе, считываются 4 байта как непосредственный адрес.
+uint32_t read_addr_operand(VM *vm) {
+    if (vm->ip >= vm->program_size) {
+        vm_error(vm, "Address operand read out of bounds");
+        return 0;
+    }
+    if (vm->memory[vm->ip] == 0xFF) {
+        vm->ip++;  // пропускаем маркер 0xFF
+        uint8_t reg = read_byte(vm);
+        if (reg >= NUM_REGS) {
+            vm_errorf(vm, "Invalid register R%d in address operand", reg);
+            return 0;
+        }
+        return vm->registers[reg];
+    } else {
+        return read_uint32(vm);
+    }
+}
+
 // Вывод состояния для отладки
 void vm_print_debug_state(VM *vm) {
     printf("DEBUG: IP: %u, SP: %u, Flags: 0x%02x\n", vm->ip, vm->sp, vm->flags);
@@ -188,12 +210,11 @@ void op_call(VM *vm) {
 
 void op_ret(VM *vm) {
     if (vm->sp == 0) {
-        vm->running = 0;
+        vm_error(vm, "Stack underflow in RET");
         return;
     }
     vm->ip = vm->stack[--vm->sp];
 }
-
 
 void op_if(VM *vm) {
     uint8_t flag_mask = read_byte(vm);
@@ -212,7 +233,7 @@ void op_load(VM *vm) {
         vm_errorf(vm, "Invalid register R%d in LOAD", reg);
         return;
     }
-    uint32_t addr = read_uint32(vm);
+    uint32_t addr = read_addr_operand(vm);
     vm->registers[reg] = read_uint32_at(vm, addr);
 }
 
@@ -222,7 +243,7 @@ void op_store(VM *vm) {
         vm_errorf(vm, "Invalid register R%d in STORE", reg);
         return;
     }
-    uint32_t addr = read_uint32(vm);
+    uint32_t addr = read_addr_operand(vm);
     write_uint32(vm, addr, vm->registers[reg]);
 }
 
@@ -356,7 +377,8 @@ void op_not(VM *vm) {
     vm->registers[dest] = ~vm->registers[reg];
 }
 
-// Изменённая инструкция CMP: второй операнд – immediate (4 байта, со знаком)
+// Инструкция CMP: сравнивает значение регистра с immediate и устанавливает флаги:
+// EQ (0x01): равны, NE (0x02): не равны, LT (0x04): меньше, GT (0x08): больше
 void op_cmp(VM *vm) {
     uint8_t reg1 = read_byte(vm);
     if (reg1 >= NUM_REGS) {
@@ -381,7 +403,7 @@ void op_cmp(VM *vm) {
         if (a < (uint32_t)imm)
             vm->flags |= 0x04;  // LT
         else
-            vm->flags |= 0x08;  // GT (GE - синоним GT)
+            vm->flags |= 0x08;  // GT
     }
 }
 
@@ -570,7 +592,7 @@ void op_file_open(VM *vm) {
         return;
     }
 
-    // Ищем свободное место, начиная с 3 (так как 0-2 заняты стандартными потоками)
+    // Ищем свободное место, начиная с 3 (0-2 заняты стандартными потоками)
     int slot = -1;
     for (int i = 3; i < MAX_FILES; i++) {
         if (vm->files[i] == NULL) {
@@ -718,21 +740,6 @@ void init_dispatch_table(instruction_fn table[256]) {
     table[OP_FILE_SEEK] = op_file_seek;
 }
 
-// void vm_run(VM *vm) {
-//     instruction_fn dispatch[256];
-//     init_dispatch_table(dispatch);
-//     while (vm->running) {
-//         if (vm->ip >= vm->program_size)
-//             break;
-//         uint8_t opcode = read_byte(vm);
-//         if (dispatch[opcode])
-//             dispatch[opcode](vm);
-//         else
-//             vm_errorf(vm, "Unknown opcode: 0x%02x at IP: %u", opcode, vm->ip - 1);
-//         if (vm->debug)
-//             vm_print_debug_state(vm);
-//     }
-// }
 void vm_run(VM *vm) {
     instruction_fn dispatch[256];
     init_dispatch_table(dispatch);
@@ -743,8 +750,7 @@ void vm_run(VM *vm) {
         if (dispatch[opcode]) {
             dispatch[opcode](vm);
         } else if (opcode == 0xFF) {
-            // Если встречаем 0xFF (часто используется как заполнитель),
-            // считаем, что достигнут конец исполняемого кода.
+            // Если встречаем 0xFF, считаем, что достигнут конец кода.
             vm->running = 0;
         } else {
             vm_errorf(vm, "Unknown opcode: 0x%02x at IP: %u", opcode, vm->ip - 1);
@@ -779,7 +785,6 @@ void vm_init(VM *vm) {
         vm->files[i] = NULL;
     }
 }
-
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
