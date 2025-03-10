@@ -9,23 +9,61 @@ permissions:
   contents: write
 
 jobs:
-  build_vm_core:
-    name: Build VM and Core (PlatformIO)
-    runs-on: ubuntu-latest
+  build_vm:
+    name: Build AirVM (Virtual Machine)
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            ext: ""
+          - os: windows-latest
+            goos: windows
+            ext: ".exe"
+          - os: macos-latest
+            goos: darwin
+            ext: ""
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install C dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential
+      - name: Setup MSYS2 on Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >
+            make
+          cache: true
 
-      - name: Build VM (AirVM)
-        working-directory: VM
+      - name: Build AirVM
         run: |
+          cd VM
           make clean
           make all
+        shell: bash
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Copy AirVM binary to artifacts
+        run: |
+          cp VM/bin/AirVM artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }} || { echo "AirVM binary not found"; exit 1; }
+
+      - name: Upload AirVM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: airvm-${{ matrix.goos }}
+          path: artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
+          overwrite: true
+
+  build_core:
+    name: Build Core (PlatformIO firmware)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -35,15 +73,12 @@ jobs:
       - name: Install PlatformIO CLI
         run: pip install -q platformio
 
-      - name: Build Core (AirCore)
+      - name: Build Core firmware
         working-directory: Core
         run: platformio run
 
       - name: Create artifacts directory
         run: mkdir -p artifacts
-
-      - name: Copy VM binary to artifacts
-        run: cp VM/bin/AirVM artifacts/AirVM || true
 
       - name: Copy Core firmware to artifacts
         run: |
@@ -55,26 +90,28 @@ jobs:
             exit 1
           fi
 
-      - name: Upload VM & Core artifacts
+      - name: Upload Core artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vm-core-artifacts
-          path: artifacts
+          name: aircore
+          path: artifacts/AirCore.bin
+          overwrite: true
 
   build_lang:
     name: Build AirLang (Compiler)
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        goos: [linux, windows, darwin]
         include:
           - os: ubuntu-latest
+            goos: linux
             ext: ""
           - os: windows-latest
+            goos: windows
             ext: ".exe"
           - os: macos-latest
+            goos: darwin
             ext: ""
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -100,31 +137,46 @@ jobs:
         with:
           name: airlang-${{ matrix.goos }}
           path: artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
+          overwrite: true
 
   release:
     name: Create GitHub Release
-    needs: [build_vm_core, build_lang]
+    needs: [build_vm, build_core, build_lang]
     runs-on: ubuntu-latest
     steps:
-      - name: Download VM & Core artifacts
+      - name: Download AirVM artifacts (linux)
         uses: actions/download-artifact@v2
         with:
-          name: vm-core-artifacts
+          name: airvm-linux
+          path: artifacts
+      - name: Download AirVM artifacts (windows)
+        uses: actions/download-artifact@v2
+        with:
+          name: airvm-windows
+          path: artifacts
+      - name: Download AirVM artifacts (darwin)
+        uses: actions/download-artifact@v2
+        with:
+          name: airvm-darwin
           path: artifacts
 
-      - name: Download AirLang (linux) artifact
+      - name: Download AirCore artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: aircore
+          path: artifacts
+
+      - name: Download AirLang artifacts (linux)
         uses: actions/download-artifact@v2
         with:
           name: airlang-linux
           path: artifacts
-
-      - name: Download AirLang (windows) artifact
+      - name: Download AirLang artifacts (windows)
         uses: actions/download-artifact@v2
         with:
           name: airlang-windows
           path: artifacts
-
-      - name: Download AirLang (darwin) artifact
+      - name: Download AirLang artifacts (darwin)
         uses: actions/download-artifact@v2
         with:
           name: airlang-darwin
@@ -134,10 +186,12 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/AirVM
+            artifacts/AirVM_linux
+            artifacts/AirVM_windows.exe
+            artifacts/AirVM_darwin
             artifacts/AirCore.bin
             artifacts/AirLang_linux
-            artifacts/AirLang_windows
+            artifacts/AirLang_windows.exe
             artifacts/AirLang_darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
