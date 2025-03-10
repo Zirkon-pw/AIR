@@ -107,25 +107,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download VM & Core artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: vm-core-artifacts
           path: artifacts
 
       - name: Download AirLang (linux) artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: airlang-linux
           path: artifacts
 
       - name: Download AirLang (windows) artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: airlang-windows
           path: artifacts
 
       - name: Download AirLang (darwin) artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: airlang-darwin
           path: artifacts
