@@ -49,6 +49,8 @@ jobs:
       - name: Build Go project (AirLang)
         run: |
           cd Lang
+          $Env:GOOS="darwin"
+          $Env:GOARCH="amd64"
           GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
       - name: Create artifacts directory
