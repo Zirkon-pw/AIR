@@ -154,39 +154,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download AirVM artifacts (linux)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airvm-linux
           path: artifacts
       - name: Download AirVM artifacts (windows)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airvm-windows
           path: artifacts
       - name: Download AirVM artifacts (darwin)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airvm-darwin
           path: artifacts
 
       - name: Download AirCore artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: aircore
           path: artifacts
 
       - name: Download AirLang artifacts (linux)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airlang-linux
           path: artifacts
       - name: Download AirLang artifacts (windows)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airlang-windows
           path: artifacts
       - name: Download AirLang artifacts (darwin)
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: airlang-darwin
           path: artifacts
