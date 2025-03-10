@@ -3,15 +3,16 @@ name: Release Cross-Platform Binaries
 on:
   push:
     tags:
-      - 'v*' # Триггерится при создании тега, начинающегося с "v"
-    branches:
-      - master # Запускается только из ветки master
+      - 'v*'  # Триггерится при создании тега, начинающегося с "v"
+    # Если оставить фильтр ветки, workflow будет запускаться только при пуше тега, привязанного к ветке master.
+    # branches:
+    #   - master
 
 jobs:
   build-and-release:
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # Не отменять остальные проверки при ошибке
+      fail-fast: false  # Не отменять остальные проверки при ошибке
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         goos: [linux, windows, darwin]
@@ -22,55 +23,55 @@ jobs:
             ext: ".exe"
           - os: macos-latest
             ext: ""
-
     steps:
-    # 1. Checkout кода
-    - name: Checkout code
-      uses: actions/checkout@v3
+      # 1. Checkout кода
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    # 2. Установка Go
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
+      # 2. Установка Go
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
 
-    # 3. Установка зависимостей для C-проекта (только для Linux)
-    - name: Install C dependencies
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential
+      # 3. Установка зависимостей для C-проекта (только для Linux)
+      - name: Install C dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
 
-    # 4. Сборка C-проекта (AirVM) только на Linux
-    - name: Build C project (AirVM)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        cd VM
-        make clean
-        make all
+      # 4. Сборка C-проекта (AirVM) только на Linux
+      - name: Build C project (AirVM)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd VM
+          make clean
+          make all
 
-    # 5. Сборка Go-проекта (AirLang)
-    - name: Build Go project
-      run: |
-        cd Lang
-        GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
+      # 5. Сборка Go-проекта (AirLang)
+      - name: Build Go project (AirLang)
+        run: |
+          cd Lang
+          GOOS=${{ matrix.goos }} GOARCH=amd64 go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
-    # 6. Создание директории для артефактов
-    - name: Create artifacts directory
-      run: mkdir -p artifacts
+      # 6. Создание директории для артефактов
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
 
-    # 7. Копирование бинарных файлов
-    - name: Copy binaries to artifacts
-      run: |
-        cp VM/bin/AirVM artifacts/AirVM || true
-        cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
+      # 7. Копирование бинарных файлов
+      - name: Copy binaries to artifacts
+        run: |
+          cp VM/bin/AirVM artifacts/AirVM || true
+          cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
 
-    # 8. Публикация релиза
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          artifacts/AirVM
-          artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 8. Публикация релиза (выполняется только при наличии тега)
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/AirVM
+            artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
