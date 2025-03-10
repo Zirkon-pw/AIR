@@ -1,4 +1,4 @@
-name: Release Cross-Platform Binaries
+name: Build and Release AIR Artifacts
 
 on:
   push:
@@ -6,13 +6,66 @@ on:
       - 'v*'
 
 permissions:
-  contents: write  # Необходимо для создания релиза
+  contents: write
 
 jobs:
-  build-and-release:
+  build_vm_core:
+    name: Build VM and Core (PlatformIO)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install C dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build VM (AirVM)
+        working-directory: VM
+        run: |
+          make clean
+          make all
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO CLI
+        run: pip install -q platformio
+
+      - name: Build Core (AirCore)
+        working-directory: Core
+        run: platformio run
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Copy VM binary to artifacts
+        run: cp VM/bin/AirVM artifacts/AirVM || true
+
+      - name: Copy Core firmware to artifacts
+        run: |
+          # По умолчанию PlatformIO кладёт бинарник в .pio/build/<env>/firmware.bin
+          CORE_BIN=$(find Core/.pio/build -type f -name "firmware.bin" | head -n 1)
+          if [ -n "$CORE_BIN" ]; then
+            cp "$CORE_BIN" artifacts/AirCore.bin
+          else
+            echo "Core firmware not found!"
+            exit 1
+          fi
+
+      - name: Upload VM & Core artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: vm-core-artifacts
+          path: artifacts
+
+  build_lang:
+    name: Build AirLang (Compiler)
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         goos: [linux, windows, darwin]
@@ -24,7 +77,7 @@ jobs:
           - os: macos-latest
             ext: ""
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Go
@@ -32,20 +85,10 @@ jobs:
         with:
           go-version: '1.20'
 
-      - name: Install C dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
 
-      - name: Build C project (AirVM)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd VM
-          make clean
-          make all
-
-      - name: Build Go project (AirLang)
+      - name: Build AirLang
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: amd64
@@ -53,20 +96,45 @@ jobs:
           cd Lang
           go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
+      - name: Upload AirLang artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: airlang-${{ matrix.goos }}
+          path: artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
 
-      - name: Copy binaries to artifacts
-        run: |
-          cp VM/bin/AirVM artifacts/AirVM || true
-          cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
+  release:
+    name: Create GitHub Release
+    needs: [build_vm_core, build_lang]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download VM & Core artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: vm-core-artifacts
+          path: artifacts
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Download AirLang (linux) artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: airlang-linux
+          path: artifacts
+
+      - name: Download AirLang (windows) artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: airlang-windows
+          path: artifacts
+
+      - name: Download AirLang (darwin) artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: airlang-darwin
+          path: artifacts
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/AirVM
-            artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
+            artifacts/**
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
