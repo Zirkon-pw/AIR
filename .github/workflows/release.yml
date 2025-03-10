@@ -3,10 +3,7 @@ name: Release Cross-Platform Binaries
 on:
   push:
     tags:
-      - 'v*'  # Триггерится при создании тега, начинающегося с "v"
-    # Если оставить фильтр ветки, workflow будет запускаться только при пуше тега, привязанного к ветке master.
-    # branches:
-    #   - master
+      - 'v*'  # Запуск при создании тега, начинающегося с "v"
 
 jobs:
   build-and-release:
@@ -24,7 +21,7 @@ jobs:
           - os: macos-latest
             ext: ""
     steps:
-      # 1. Checkout кода
+      # 1. Клонирование репозитория
       - name: Checkout code
         uses: actions/checkout@v3
 
@@ -34,14 +31,14 @@ jobs:
         with:
           go-version: '1.20'
 
-      # 3. Установка зависимостей для C-проекта (только для Linux)
-      - name: Install C dependencies
+      # 3. Установка зависимостей (только для Linux)
+      - name: Install C dependencies (Linux only)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
 
-      # 4. Сборка C-проекта (AirVM) только на Linux
+      # 4. Сборка C-проекта (AirVM) на Linux
       - name: Build C project (AirVM)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -65,11 +62,17 @@ jobs:
           cp VM/bin/AirVM artifacts/AirVM || true
           cp Lang/AirLang_${{ matrix.goos }}${{ matrix.ext }} artifacts/ || true
 
-      # 8. Публикация релиза (выполняется только при наличии тега)
+      # 8. Проверка содержимого артефактов перед публикацией
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      # 9. Публикация релиза
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           files: |
             artifacts/AirVM
             artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
