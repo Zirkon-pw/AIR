@@ -3,13 +3,17 @@ name: Build and Release AIR Artifacts
 on:
   push:
     tags:
-      - 'v*'
+      - 'compiler_v*'
+      - 'core_v*'
+      - 'vm_v*'
 
 permissions:
   contents: write
 
 jobs:
+
   build_vm:
+    if: startsWith(github.ref, 'refs/tags/vm_')
     name: Build AirVM (Virtual Machine)
     strategy:
       matrix:
@@ -33,8 +37,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           update: true
-          install: >
-            make
+          install: make
           cache: true
 
       - name: Build AirVM
@@ -68,6 +71,7 @@ jobs:
           overwrite: true
 
   build_core:
+    if: startsWith(github.ref, 'refs/tags/core_')
     name: Build Core (PlatformIO firmware)
     runs-on: ubuntu-latest
     steps:
@@ -107,6 +111,7 @@ jobs:
           overwrite: true
 
   build_lang:
+    if: startsWith(github.ref, 'refs/tags/compiler_')
     name: Build AirLang (Compiler)
     strategy:
       matrix:
@@ -149,58 +154,19 @@ jobs:
           overwrite: true
 
   release:
+    if: startsWith(github.ref, 'refs/tags/vm_') || startsWith(github.ref, 'refs/tags/core_') || startsWith(github.ref, 'refs/tags/compiler_')
     name: Create GitHub Release
     needs: [build_vm, build_core, build_lang]
     runs-on: ubuntu-latest
     steps:
-      - name: Download AirVM artifacts (linux)
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: airvm-linux
-          path: artifacts
-      - name: Download AirVM artifacts (windows)
-        uses: actions/download-artifact@v4
-        with:
-          name: airvm-windows
-          path: artifacts
-      - name: Download AirVM artifacts (darwin)
-        uses: actions/download-artifact@v4
-        with:
-          name: airvm-darwin
-          path: artifacts
-
-      - name: Download AirCore artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aircore
-          path: artifacts
-
-      - name: Download AirLang artifacts (linux)
-        uses: actions/download-artifact@v4
-        with:
-          name: airlang-linux
-          path: artifacts
-      - name: Download AirLang artifacts (windows)
-        uses: actions/download-artifact@v4
-        with:
-          name: airlang-windows
-          path: artifacts
-      - name: Download AirLang artifacts (darwin)
-        uses: actions/download-artifact@v4
-        with:
-          name: airlang-darwin
           path: artifacts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/AirVM_linux
-            artifacts/AirVM_windows.exe
-            artifacts/AirVM_darwin
-            artifacts/AirCore.bin
-            artifacts/AirLang_linux
-            artifacts/AirLang_windows.exe
-            artifacts/AirLang_darwin
+          files: artifacts/**
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
