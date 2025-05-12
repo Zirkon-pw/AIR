@@ -46,5 +46,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/AirLang_*
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
