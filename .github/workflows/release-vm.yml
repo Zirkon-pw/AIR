@@ -1,0 +1,64 @@
+name: Release Virtual Machine (AirVM)
+
+on:
+  push:
+    tags:
+      - 'vm_v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build AirVM
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            ext: ""
+          - os: windows-latest
+            goos: windows
+            ext: ".exe"
+          - os: macos-latest
+            goos: darwin
+            ext: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup MSYS2 (Windows only)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: make
+          cache: true
+
+      - name: Build AirVM
+        shell: bash
+        run: |
+          cd VM
+          make clean
+          make all
+
+      - name: Collect binary
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [ -f "VM/bin/AirVM" ]; then
+            cp VM/bin/AirVM artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
+          elif [ -f "VM/bin/AirVM.exe" ]; then
+            cp VM/bin/AirVM.exe artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
+          else
+            echo "AirVM binary not found!"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/AirVM_*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
