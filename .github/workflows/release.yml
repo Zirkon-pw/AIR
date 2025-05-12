@@ -1,118 +1,17 @@
-name: Build and Release AIR Artifacts
+name: Release Compiler (AirLang)
 
 on:
   push:
     tags:
       - 'compiler_v*'
-      - 'core_v*'
-      - 'vm_v*'
 
 permissions:
   contents: write
 
 jobs:
-
-  build_vm:
-    if: startsWith(github.ref, 'refs/tags/vm_')
-    name: Build AirVM (Virtual Machine)
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            ext: ""
-          - os: windows-latest
-            goos: windows
-            ext: ".exe"
-          - os: macos-latest
-            goos: darwin
-            ext: ""
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup MSYS2 on Windows
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          install: make
-          cache: true
-
-      - name: Build AirVM
-        shell: bash
-        run: |
-          cd VM
-          make clean
-          make all
-
-      - name: Create artifacts directory
-        shell: bash
-        run: mkdir -p artifacts
-
-      - name: Copy AirVM binary to artifacts
-        shell: bash
-        run: |
-          if [ -f "VM/bin/AirVM" ]; then
-            cp VM/bin/AirVM artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
-          elif [ -f "VM/bin/AirVM.exe" ]; then
-            cp VM/bin/AirVM.exe artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
-          else
-            echo "AirVM binary not found"
-            exit 1
-          fi
-
-      - name: Upload AirVM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: airvm-${{ matrix.goos }}
-          path: artifacts/AirVM_${{ matrix.goos }}${{ matrix.ext }}
-          overwrite: true
-
-  build_core:
-    if: startsWith(github.ref, 'refs/tags/core_')
-    name: Build Core (PlatformIO firmware)
+  build:
+    name: Build AirLang
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Install PlatformIO CLI
-        run: pip install -q platformio
-
-      - name: Build Core firmware
-        working-directory: Core
-        run: platformio run
-
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
-
-      - name: Copy Core firmware to artifacts
-        run: |
-          CORE_BIN=$(find Core/.pio/build -type f -name "firmware.bin" | head -n 1)
-          if [ -n "$CORE_BIN" ]; then
-            cp "$CORE_BIN" artifacts/AirCore.bin
-          else
-            echo "Core firmware not found!"
-            exit 1
-          fi
-
-      - name: Upload Core artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aircore
-          path: artifacts/AirCore.bin
-          overwrite: true
-
-  build_lang:
-    if: startsWith(github.ref, 'refs/tags/compiler_')
-    name: Build AirLang (Compiler)
     strategy:
       matrix:
         include:
@@ -125,9 +24,8 @@ jobs:
           - os: macos-latest
             goos: darwin
             ext: ""
-    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Set up Go
@@ -135,38 +33,18 @@ jobs:
         with:
           go-version: '1.20'
 
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
-
       - name: Build AirLang
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: amd64
         run: |
+          mkdir -p artifacts
           cd Lang
           go build -o ../artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }} main.go
 
-      - name: Upload AirLang artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: airlang-${{ matrix.goos }}
-          path: artifacts/AirLang_${{ matrix.goos }}${{ matrix.ext }}
-          overwrite: true
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/vm_') || startsWith(github.ref, 'refs/tags/core_') || startsWith(github.ref, 'refs/tags/compiler_')
-    name: Create GitHub Release
-    needs: [build_vm, build_core, build_lang]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create GitHub Release
+      - name: Upload Artifact
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**
+          files: artifacts/AirLang_*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
