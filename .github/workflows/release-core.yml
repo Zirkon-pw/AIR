@@ -1,0 +1,47 @@
+name: Release Core Firmware (AirCore)
+
+on:
+  push:
+    tags:
+      - 'core_v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build AirCore Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install -q platformio
+
+      - name: Build firmware
+        working-directory: Core
+        run: platformio run
+
+      - name: Collect binary
+        run: |
+          mkdir -p artifacts
+          CORE_BIN=$(find Core/.pio/build -type f -name "firmware.bin" | head -n 1)
+          if [ -n "$CORE_BIN" ]; then
+            cp "$CORE_BIN" artifacts/AirCore.bin
+          else
+            echo "Core firmware not found!"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/AirCore.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
