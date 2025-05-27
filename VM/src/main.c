@@ -58,18 +58,20 @@ typedef enum {
 } Opcode;
 
 typedef struct {
-    uint8_t *memory;         // Динамически выделяемая память для кода и данных
-    uint32_t memory_size;    // Текущий размер памяти
-    uint32_t program_size;   // Размер секции кода
-    uint32_t registers[NUM_REGS];  // Регистры R0-R31
-    uint32_t stack[STACK_SIZE];    // Стек
-    uint32_t sp;                   // Указатель стека
-    uint32_t ip;                   // Указатель инструкций
-    uint8_t flags;                 // Флаги: 0x01: EQ, 0x02: NE, 0x04: LT, 0x08: GT (GE)
-    int running;                   // Флаг выполнения
-    int debug;                     // Режим отладки
-    FILE *files[MAX_FILES];        // Таблица открытых файлов
+    uint8_t *memory;
+    uint32_t memory_size;
+    uint32_t program_size;
+    uint32_t registers[NUM_REGS];
+    uint32_t stack[STACK_SIZE];
+    uint32_t sp;
+    uint32_t ip;
+    uint8_t flags;
+    int running;
+    int debug;
+    FILE *files[MAX_FILES];
+    int error_occurred; // Добавлен флаг ошибки
 } VM;
+
 
 // Функция для расширения памяти виртуальной машины по необходимости
 void ensure_memory(VM *vm, uint32_t required) {
@@ -94,10 +96,10 @@ void ensure_memory(VM *vm, uint32_t required) {
     }
 }
 
-// Функции для обработки ошибок
 void vm_error(VM *vm, const char *message) {
     fprintf(stderr, "Error at IP %u: %s\n", vm->ip, message);
     vm->running = 0;
+    vm->error_occurred = 1; // Устанавливаем флаг ошибки
 }
 
 void vm_errorf(VM *vm, const char *format, ...) {
@@ -108,6 +110,7 @@ void vm_errorf(VM *vm, const char *format, ...) {
     fprintf(stderr, "\n");
     va_end(args);
     vm->running = 0;
+    vm->error_occurred = 1; // Устанавливаем флаг ошибки
 }
 
 // Функции чтения инструкций
@@ -640,6 +643,7 @@ void vm_init(VM *vm) {
     memset(vm->stack, 0, STACK_SIZE * sizeof(uint32_t));
     vm->sp = 0; vm->ip = 0; vm->flags = 0; vm->running = 1;
     vm->program_size = 0; vm->debug = 0;
+    vm->error_occurred = 0; // Инициализация флага ошибки
     vm->files[0] = stdin; vm->files[1] = stdout; vm->files[2] = stderr;
     for (int i = 3; i < MAX_FILES; i++) { vm->files[i] = NULL; }
 }
@@ -652,47 +656,72 @@ void vm_cleanup(VM *vm) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) { printf("Usage: %s <program.bin> [debug]\n", argv[0]); return 1; }
-    VM vm; vm_init(&vm);
-    if (argc > 2 && strcmp(argv[2], "debug") == 0) { vm.debug = 1; }
+    if (argc < 2) { 
+        printf("Usage: %s <program.bin> [debug]\n", argv[0]); 
+        return 1; 
+    }
 
+    VM vm;
+    vm_init(&vm);
+    
+    if (argc > 2 && strcmp(argv[2], "debug") == 0) { 
+        vm.debug = 1; 
+    }
+
+    // Загрузка программы
     FILE *f = fopen(argv[1], "rb");
-    if (!f) { perror("Error opening program file"); vm_cleanup(&vm); return 1; }
+    if (!f) { 
+        perror("Error opening program file"); 
+        vm_cleanup(&vm); 
+        return 1; 
+    }
 
+    // Чтение размера кода
     uint32_t code_size;
     if (fread(&code_size, sizeof(uint32_t), 1, f) != 1) {
-        perror("Error reading code size header"); fclose(f); vm_cleanup(&vm); return 1;
+        perror("Error reading code size header"); 
+        fclose(f); 
+        vm_cleanup(&vm); 
+        return 1;
     }
-    ensure_memory(&vm, code_size + 4); // +4 для заголовка, хотя мы его уже прочитали
-    if (!vm.running) { fclose(f); vm_cleanup(&vm); return 1; }
 
-    // Перемещаем IP за заголовок (который мы не копируем)
-    // НЕТ, мы копируем код С НАЧАЛА ПАМЯТИ. IP будет 0.
-    // Заголовок нужен только для чтения.
-    fseek(f, 4, SEEK_SET); // Пропускаем заголовок
+    // Выделение памяти
+    ensure_memory(&vm, code_size + 4);
+    if (!vm.running) { 
+        fclose(f); 
+        vm_cleanup(&vm); 
+        return 1; 
+    }
 
-    // Читаем сам код
+    // Чтение кода программы
+    fseek(f, 4, SEEK_SET);
     size_t read_bytes = fread(vm.memory, 1, code_size, f);
     fclose(f);
 
     if (read_bytes != code_size) {
-        fprintf(stderr, "Error reading program: expected %u bytes, got %zu\n", code_size, read_bytes);
-        vm_cleanup(&vm); return 1;
+        fprintf(stderr, "Error reading program: expected %u bytes, got %zu\n", 
+                code_size, read_bytes);
+        vm_cleanup(&vm); 
+        return 1;
     }
 
     vm.program_size = code_size;
     printf("Loaded program of %u bytes\n", code_size);
 
+    // Выполнение программы
     clock_t start_time = clock();
     vm_run(&vm);
     clock_t end_time = clock();
     double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
 
-    // Проверяем, была ли ошибка во время выполнения
-    if (vm.running == 0 && vm.ip < vm.program_size) {
-         printf("\nExecution finished with an ERROR.\n");
+    // Проверка статуса завершения
+    if (vm.error_occurred) {
+        printf("\nExecution finished with an ERROR.\n");
+    } else if (vm.running) {
+        printf("\nExecution interrupted unexpectedly.\n");
     } else {
-         printf("\nExecution finished. Time: %.6f seconds\n", elapsed_time);
+        printf("\nExecution finished successfully. Time: %.6f seconds\n", 
+               elapsed_time);
     }
 
     vm_cleanup(&vm);
