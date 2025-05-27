@@ -66,29 +66,20 @@ var FLAGS = map[string]int{
 	"GE": 0x08, // Greater or Equal (синоним GT)
 }
 
-func argSize(argType string) (int, error) {
-	switch argType {
-	case "reg", "flags":
-		return 1, nil
-	case "addr", "imm":
-		return 4, nil
-	default:
-		return 0, fmt.Errorf("неизвестный тип аргумента: %s", argType)
-	}
-}
-
 // processEscapes преобразует escape-последовательности в соответствующие символы.
 func processEscapes(s string) (string, error) {
-	// Используем strconv.Unquote для обработки escape-последовательностей.
-	// Если строка не заключена в кавычки, добавляем их.
-	if !(strings.HasPrefix(s, "\"") || strings.HasPrefix(s, "'")) {
+	// Добавляем кавычки, если их нет, для strconv.Unquote
+	if !strings.HasPrefix(s, "\"") {
 		s = "\"" + s + "\""
 	}
-	return strconv.Unquote(s)
+	t, err := strconv.Unquote(s)
+	if err != nil {
+		return "", fmt.Errorf("ошибка обработки escape-последовательности '%s': %v", s, err)
+	}
+	return t, nil
 }
 
-// splitLabel разбивает строку на метку и остальную часть,
-// ищет двоеточие только вне строковых литералов.
+// splitLabel разбивает строку на метку и остальную часть.
 func splitLabel(line string) (string, string) {
 	inQuote := false
 	var quoteChar rune
@@ -125,43 +116,46 @@ func NewAsmCompiler() *AsmCompiler {
 // parseValue преобразует строковое представление аргумента в число.
 func (ac *AsmCompiler) parseValue(arg string) (int, error) {
 	arg = strings.TrimSpace(arg)
-	// Если аргумент – символический флаг
 	if val, ok := FLAGS[arg]; ok {
 		return val, nil
 	}
-	if strings.ToLower(arg) == "flags" {
-		return 0, nil
-	}
+
+	// Убираем скобки [ ] для адресации
 	if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
 		arg = strings.TrimSpace(arg[1 : len(arg)-1])
 	}
+
+	// Регистр R<n>
+	if matched, _ := regexp.MatchString(`^R\d+$`, arg); matched {
+		return strconv.Atoi(arg[1:])
+	}
+
+	// Шестнадцатеричное число 0x...
 	if strings.HasPrefix(arg, "0x") {
 		v, err := strconv.ParseInt(arg[2:], 16, 32)
 		return int(v), err
-	} else if (strings.HasPrefix(arg, "'") && strings.HasSuffix(arg, "'")) ||
-		(strings.HasPrefix(arg, "\"") && strings.HasSuffix(arg, "\"")) {
-		if len(arg) < 3 {
-			return 0, fmt.Errorf("строковая константа слишком короткая: %s", arg)
-		}
-		return int(arg[1]), nil
-	} else if num, err := strconv.Atoi(arg); err == nil {
+	}
+
+	// Десятичное число
+	if num, err := strconv.Atoi(arg); err == nil {
 		return num, nil
 	}
-	// Регистр в формате R\d+
-	match, _ := regexp.MatchString(`^R\d+$`, arg)
-	if match {
-		return strconv.Atoi(arg[1:])
+
+	// Символ 'c'
+	if strings.HasPrefix(arg, "'") && strings.HasSuffix(arg, "'") && len(arg) == 3 {
+		return int(arg[1]), nil
 	}
-	// Проверка метки
+
+	// Метка
 	if val, ok := ac.symbols[arg]; ok {
 		return val, nil
 	}
+
 	return 0, fmt.Errorf("неизвестная метка или значение: '%s'", arg)
 }
 
 // preprocessLine удаляет комментарии, обрезает пробелы и отделяет метку.
 func (ac *AsmCompiler) preprocessLine(line string) (string, string) {
-	// Удаляем комментарии (начиная с ';')
 	if idx := strings.Index(line, ";"); idx != -1 {
 		line = line[:idx]
 	}
@@ -182,7 +176,7 @@ func (ac *AsmCompiler) expandLine(line string, lineNumber int) ([]string, error)
 		}
 		return []string{}, nil
 	}
-	// Если инструкция начинается с точки – это директива, оставляем как есть.
+
 	if strings.HasPrefix(instr, ".") {
 		return []string{line}, nil
 	}
@@ -194,39 +188,48 @@ func (ac *AsmCompiler) expandLine(line string, lineNumber int) ([]string, error)
 		args = strings.TrimSpace(instr[len(parts[0]):])
 	}
 
-	// 1. Обработка MOV с MOD.
+	// Обработка MOV с MOD.
 	if mnemonic == "MOV" && regexp.MustCompile(`\bMOD\b`).MatchString(args) {
-		argList := strings.Split(args, ",")
-		if len(argList) != 2 {
-			return nil, fmt.Errorf("неверный формат инструкции MOV (Строка %d)", lineNumber)
+		re := regexp.MustCompile(`(R\d+)\s*,\s*(R\d+|\d+)\s+MOD\s+(R\d+|\d+)`)
+		matches := re.FindStringSubmatch(args)
+		if len(matches) != 4 {
+			return nil, fmt.Errorf("неверный формат MOV с MOD: %s (Строка %d)", args, lineNumber)
 		}
-		dest := strings.TrimSpace(argList[0])
-		expr := strings.TrimSpace(argList[1])
-		tokens := strings.Fields(expr)
-		if len(tokens) != 3 || strings.ToUpper(tokens[1]) != "MOD" {
-			return nil, fmt.Errorf("неверный формат выражения в MOV с MOD (Строка %d)", lineNumber)
-		}
-		X := tokens[0]
-		Y := tokens[2]
+		dest, X, Y := matches[1], matches[2], matches[3]
+
 		var extra []string
 		prefix := ""
 		if label != "" {
 			prefix = label + ": "
 		}
-		extra = append(extra, fmt.Sprintf("%sDIV R30, %s, %s", prefix, X, Y))
-		extra = append(extra, fmt.Sprintf("MUL R31, R30, %s", Y))
-		extra = append(extra, fmt.Sprintf("SUB %s, %s, R31", dest, X))
+
+		// Загружаем X, если это immediate
+		xReg := X
+		if !strings.HasPrefix(X, "R") {
+			extra = append(extra, fmt.Sprintf("LOADI R30, %s", X))
+			xReg = "R30"
+		}
+		// Загружаем Y, если это immediate
+		yReg := Y
+		if !strings.HasPrefix(Y, "R") {
+			extra = append(extra, fmt.Sprintf("LOADI R31, %s", Y))
+			yReg = "R31"
+		}
+
+		// Вычисляем MOD
+		extra = append(extra, fmt.Sprintf("%sDIV R30, %s, %s", prefix, xReg, yReg))
+		extra = append(extra, fmt.Sprintf("MUL R31, R30, %s", yReg))
+		extra = append(extra, fmt.Sprintf("SUB %s, %s, R31", dest, xReg))
 		return extra, nil
 	}
 
-	// 2. Обработка арифметических инструкций (с немедленными операндами).
+	// Обработка арифметических операций с immediate
 	arithmeticOps := map[string]bool{"ADD": true, "SUB": true, "MUL": true, "DIV": true, "AND": true, "OR": true, "XOR": true}
 	if arithmeticOps[mnemonic] {
 		operands := []string{}
 		for _, op := range strings.Split(args, ",") {
 			operands = append(operands, strings.TrimSpace(op))
 		}
-		// Если SUB с 2 операндами, преобразуем в формат с 3 операндами.
 		if mnemonic == "SUB" && len(operands) == 2 {
 			operands = []string{operands[0], operands[0], operands[1]}
 		}
@@ -235,131 +238,53 @@ func (ac *AsmCompiler) expandLine(line string, lineNumber int) ([]string, error)
 		}
 		var extra []string
 		tempUsed := map[string]string{}
-		nextTemp := 30
-		for i, op := range operands {
-			matched, _ := regexp.MatchString(`^R\d+$`, op)
-			if !matched {
+		nextTempReg := 30
+		for i := 1; i <= 2; i++ { // Проверяем 2-й и 3-й операнды
+			op := operands[i]
+			if !strings.HasPrefix(op, "R") {
 				if t, ok := tempUsed[op]; ok {
 					operands[i] = t
 				} else {
-					if nextTemp > 31 {
-						return nil, errors.New("нет доступных временных регистров для немедленных значений")
+					if nextTempReg > 31 {
+						return nil, errors.New("нет временных регистров")
 					}
-					temp := fmt.Sprintf("R%d", nextTemp)
-					nextTemp++
+					temp := fmt.Sprintf("R%d", nextTempReg)
+					nextTempReg++
 					extra = append(extra, fmt.Sprintf("LOADI %s, %s", temp, op))
 					tempUsed[op] = temp
 					operands[i] = temp
 				}
 			}
 		}
-		newLine := fmt.Sprintf("%s %s", mnemonic, strings.Join(operands, ", "))
+		newLine := fmt.Sprintf("%s %s, %s, %s", mnemonic, operands[0], operands[1], operands[2])
 		if label != "" {
 			newLine = label + ": " + newLine
 		}
 		return append(extra, newLine), nil
 	}
 
-	// 3. Для READ и WRITE: все операнды должны быть регистрами.
-	if mnemonic == "READ" || mnemonic == "WRITE" {
+	// Обработка CMP reg, reg -> CMP reg, imm (если возможно)
+	if mnemonic == "CMP" {
 		operands := []string{}
 		for _, op := range strings.Split(args, ",") {
 			operands = append(operands, strings.TrimSpace(op))
 		}
-		var extra []string
-		tempUsed := map[string]string{}
-		nextTemp := 30
-		for i, op := range operands {
-			matched, _ := regexp.MatchString(`^R\d+$`, op)
-			if !matched {
-				if t, ok := tempUsed[op]; ok {
-					operands[i] = t
-				} else {
-					if nextTemp > 31 {
-						return nil, errors.New("нет доступных временных регистров для немедленных значений")
-					}
-					temp := fmt.Sprintf("R%d", nextTemp)
-					nextTemp++
-					extra = append(extra, fmt.Sprintf("LOADI %s, %s", temp, op))
-					tempUsed[op] = temp
-					operands[i] = temp
-				}
-			}
-		}
-		newLine := fmt.Sprintf("%s %s", mnemonic, strings.Join(operands, ", "))
-		if label != "" {
-			newLine = label + ": " + newLine
-		}
-		return append(extra, newLine), nil
-	}
-
-	// 4. Если STORE записана как STORE [addr], reg – меняем порядок аргументов.
-	if mnemonic == "STORE" {
-		argList := []string{}
-		for _, a := range strings.Split(args, ",") {
-			argList = append(argList, strings.TrimSpace(a))
-		}
-		if len(argList) == 2 && strings.HasPrefix(argList[0], "[") && strings.HasSuffix(argList[0], "]") {
-			args = fmt.Sprintf("%s, %s", argList[1], argList[0])
+		if len(operands) == 2 && strings.HasPrefix(operands[1], "R") {
+			return nil, fmt.Errorf("CMP reg, reg не поддерживается. Используйте CMP reg, imm (Строка %d)", lineNumber)
 		}
 	}
 
-	// 5. Обработка адресных операндов вида [imm + Rn].
-	if _, ok := OPCODES[mnemonic]; ok {
-		_, argTypes := OPCODES[mnemonic].code, OPCODES[mnemonic].types
-		actualArgs := []string{}
-		if args != "" {
-			for _, a := range strings.Split(args, ",") {
-				actualArgs = append(actualArgs, strings.TrimSpace(a))
-			}
-		}
-		newArgs := []string{}
-		var extra []string
-		for i, arg := range actualArgs {
-			if i < len(argTypes) && (argTypes[i] == "addr" || argTypes[i] == "imm") {
-				if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
-					inner := strings.TrimSpace(arg[1 : len(arg)-1])
-					if matched, _ := regexp.MatchString(`^R\d+$`, inner); matched {
-						newArgs = append(newArgs, arg)
-					} else if strings.Contains(inner, "+") {
-						parts := strings.Split(inner, "+")
-						if len(parts) != 2 {
-							return nil, fmt.Errorf("неверное выражение адреса (Строка %d)", lineNumber)
-						}
-						immPart := strings.TrimSpace(parts[0])
-						regPart := strings.TrimSpace(parts[1])
-						if matched, _ := regexp.MatchString(`^R\d+$`, regPart); !matched {
-							return nil, fmt.Errorf("ожидался регистр во второй части выражения (Строка %d)", lineNumber)
-						}
-						extra = append(extra, fmt.Sprintf("LOADI R30, %s", immPart))
-						extra = append(extra, fmt.Sprintf("ADD R30, R30, %s", regPart))
-						newArgs = append(newArgs, "[R30]")
-					} else {
-						newArgs = append(newArgs, arg)
-					}
-				} else {
-					newArgs = append(newArgs, arg)
-				}
-			} else {
-				newArgs = append(newArgs, arg)
-			}
-		}
-		newLine := mnemonic
-		if len(newArgs) > 0 {
-			newLine += " " + strings.Join(newArgs, ", ")
-		}
-		if label != "" {
-			newLine = label + ": " + newLine
-		}
-		return append(extra, newLine), nil
+	// Обработка PRINTS "..."
+	if mnemonic == "PRINTS" && strings.HasPrefix(args, "\"") {
+		return nil, fmt.Errorf("PRINTS \"...\" не поддерживается. Используйте .ASCIIZ и метку (Строка %d)", lineNumber)
 	}
 
 	return []string{line}, nil
 }
 
-// calculateLineLength вычисляет длину строки в байтах для записи в байт-код.
+// calculateLineLength вычисляет длину строки в байтах.
 func (ac *AsmCompiler) calculateLineLength(line string, lineNumber int) (int, error) {
-	_, instr := ac.preprocessLine(line) // заменили label на _
+	_, instr := ac.preprocessLine(line)
 	if instr == "" {
 		return 0, nil
 	}
@@ -369,23 +294,20 @@ func (ac *AsmCompiler) calculateLineLength(line string, lineNumber int) (int, er
 		directive := strings.ToUpper(tokens[0])
 		switch directive {
 		case ".ASCIIZ":
-			if len(tokens) < 2 {
-				return 0, fmt.Errorf("отсутствует строка для .ASCIIZ (Строка %d)", lineNumber)
-			}
 			s := strings.TrimSpace(instr[len(tokens[0]):])
 			s = strings.Trim(s, "\"'")
 			processed, err := processEscapes(s)
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			return len([]byte(processed)) + 1, nil
 		case ".SPACE":
 			if len(tokens) < 2 {
-				return 0, fmt.Errorf("отсутствует аргумент для .SPACE (Строка %d)", lineNumber)
+				return 0, fmt.Errorf("нет аргумента для .SPACE (Строка %d)", lineNumber)
 			}
 			val, err := ac.parseValue(tokens[1])
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			return val, nil
 		case ".BYTE":
@@ -393,7 +315,7 @@ func (ac *AsmCompiler) calculateLineLength(line string, lineNumber int) (int, er
 		case ".WORD":
 			return 4, nil
 		default:
-			return 0, fmt.Errorf("неизвестная директива: %s", directive)
+			return 0, fmt.Errorf("неизвестная директива: %s (Строка %d)", directive, lineNumber)
 		}
 	}
 
@@ -405,36 +327,36 @@ func (ac *AsmCompiler) calculateLineLength(line string, lineNumber int) (int, er
 	}
 	op, ok := OPCODES[mnemonic]
 	if !ok {
-		return 0, fmt.Errorf("неизвестная инструкция: %s", mnemonic)
+		return 0, fmt.Errorf("неизвестная инструкция: %s (Строка %d)", mnemonic, lineNumber)
 	}
-	length := 1 // опкод занимает 1 байт
+	length := 1
 	actualArgs := []string{}
 	if args != "" {
 		for _, a := range strings.Split(args, ",") {
 			actualArgs = append(actualArgs, strings.TrimSpace(a))
 		}
 	}
+	if len(actualArgs) != len(op.types) {
+		return 0, fmt.Errorf("неверное число аргументов для '%s' (Строка %d)", mnemonic, lineNumber)
+	}
+
 	for i, argType := range op.types {
+		arg := actualArgs[i]
 		if argType == "reg" || argType == "flags" {
 			length++
 		} else if argType == "addr" || argType == "imm" {
-			if i < len(actualArgs) {
-				arg := actualArgs[i]
-				if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
-					inner := strings.TrimSpace(arg[1 : len(arg)-1])
-					if matched, _ := regexp.MatchString(`^R\d+$`, inner); matched {
-						length += 2
-					} else {
-						length += 4
-					}
+			if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
+				inner := strings.TrimSpace(arg[1 : len(arg)-1])
+				if matched, _ := regexp.MatchString(`^R\d+$`, inner); matched {
+					length += 2 // 0xFF + reg
 				} else {
-					length += 4
+					length += 4 // [imm] -> imm
 				}
 			} else {
-				return 0, fmt.Errorf("не хватает аргументов в строке %d", lineNumber)
+				length += 4 // imm или addr
 			}
 		} else {
-			return 0, fmt.Errorf("неизвестный тип аргумента: %s", argType)
+			return 0, fmt.Errorf("неизвестный тип аргумента: %s (Строка %d)", argType, lineNumber)
 		}
 	}
 	return length, nil
@@ -442,20 +364,21 @@ func (ac *AsmCompiler) calculateLineLength(line string, lineNumber int) (int, er
 
 // compileLine генерирует байт-код для одной строки.
 func (ac *AsmCompiler) compileLine(line string, lineNumber int) error {
-	_, instr := ac.preprocessLine(line) // заменили label на _
+	_, instr := ac.preprocessLine(line)
 	if instr == "" {
 		return nil
 	}
+
 	if strings.HasPrefix(instr, ".") {
 		tokens := strings.Fields(instr)
 		directive := strings.ToUpper(tokens[0])
+		argsStr := strings.TrimSpace(instr[len(tokens[0]):])
 		switch directive {
 		case ".ASCIIZ":
-			s := strings.TrimSpace(instr[len(tokens[0]):])
-			s = strings.Trim(s, "\"'")
+			s := strings.Trim(argsStr, "\"'")
 			processed, err := processEscapes(s)
 			if err != nil {
-				return err
+				return fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			data := append([]byte(processed), 0)
 			ac.code = append(ac.code, data...)
@@ -463,21 +386,21 @@ func (ac *AsmCompiler) compileLine(line string, lineNumber int) error {
 		case ".SPACE":
 			val, err := ac.parseValue(tokens[1])
 			if err != nil {
-				return err
+				return fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			ac.code = append(ac.code, make([]byte, val)...)
 			ac.ip += val
 		case ".BYTE":
 			val, err := ac.parseValue(tokens[1])
 			if err != nil {
-				return err
+				return fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			ac.code = append(ac.code, byte(val))
 			ac.ip++
 		case ".WORD":
 			val, err := ac.parseValue(tokens[1])
 			if err != nil {
-				return err
+				return fmt.Errorf("строка %d: %w", lineNumber, err)
 			}
 			buf := new(bytes.Buffer)
 			if err := binary.Write(buf, binary.LittleEndian, uint32(val)); err != nil {
@@ -486,7 +409,7 @@ func (ac *AsmCompiler) compileLine(line string, lineNumber int) error {
 			ac.code = append(ac.code, buf.Bytes()...)
 			ac.ip += 4
 		default:
-			return fmt.Errorf("неизвестная директива: %s", directive)
+			return fmt.Errorf("неизвестная директива: %s (Строка %d)", directive, lineNumber)
 		}
 		return nil
 	}
@@ -508,88 +431,49 @@ func (ac *AsmCompiler) compileLine(line string, lineNumber int) error {
 		}
 	}
 	if len(actualArgs) != len(op.types) {
-		return fmt.Errorf("неверное число аргументов для '%s': ожидалось %d, получено %d (Строка %d)",
-			mnemonic, len(op.types), len(actualArgs), lineNumber)
+		return fmt.Errorf("неверное число аргументов для '%s' (Строка %d)", mnemonic, lineNumber)
 	}
 
-	// Записываем опкод.
 	ac.code = append(ac.code, op.code)
 	ac.ip++
 
-	// Обработка аргументов.
 	for i, argType := range op.types {
 		arg := actualArgs[i]
-		if argType == "reg" {
-			if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
-				arg = strings.TrimSpace(arg[1 : len(arg)-1])
+		val, err := ac.parseValue(arg)
+		if err != nil {
+			// Если parseValue не справился, но это адрес [Rn], пробуем иначе
+			if (argType == "addr" || argType == "imm") && strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
+				inner := strings.TrimSpace(arg[1 : len(arg)-1])
+				if matched, _ := regexp.MatchString(`^R\d+$`, inner); matched {
+					regNum, _ := strconv.Atoi(inner[1:])
+					ac.code = append(ac.code, 0xFF, byte(regNum))
+					ac.ip += 2
+					continue // Переходим к следующему аргументу
+				}
 			}
-			matched, _ := regexp.MatchString(`^R\d+$`, arg)
-			if !matched {
-				return fmt.Errorf("ожидался регистр (например, R0), получено: %s (Строка %d)", arg, lineNumber)
-			}
-			regNum, err := strconv.Atoi(arg[1:])
-			if err != nil {
-				return err
-			}
-			if regNum < 0 || regNum >= 32 {
-				return fmt.Errorf("регистр должен быть в диапазоне 0-31: %s (Строка %d)", arg, lineNumber)
-			}
-			ac.code = append(ac.code, byte(regNum))
-			ac.ip++
-		} else if argType == "flags" {
-			flagsVal, err := ac.parseValue(arg)
-			if err != nil {
-				return err
-			}
-			// Проверяем маску флагов
-			if flagsVal & ^0x0F != 0 {
-				return fmt.Errorf("некорректная маска флагов: %s (Строка %d)", arg, lineNumber)
-			}
-			ac.code = append(ac.code, byte(flagsVal))
+			return fmt.Errorf("ошибка парсинга '%s' (Строка %d): %v", arg, lineNumber, err)
+		}
+
+		if argType == "reg" || argType == "flags" {
+			ac.code = append(ac.code, byte(val))
 			ac.ip++
 		} else if argType == "addr" || argType == "imm" {
+			// Проверяем, не было ли это [Rn], что уже обработано
 			if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
 				inner := strings.TrimSpace(arg[1 : len(arg)-1])
 				if matched, _ := regexp.MatchString(`^R\d+$`, inner); matched {
-					regNum, err := strconv.Atoi(inner[1:])
-					if err != nil {
-						return err
-					}
+					regNum, _ := strconv.Atoi(inner[1:])
 					ac.code = append(ac.code, 0xFF, byte(regNum))
 					ac.ip += 2
-				} else {
-					value, err := ac.parseValue(arg)
-					if err != nil {
-						return err
-					}
-					if value < 0 || value >= 65536 {
-						return fmt.Errorf("адрес превышает 64К: %s (Строка %d)", arg, lineNumber)
-					}
+				} else { // [imm]
 					buf := new(bytes.Buffer)
-					if err := binary.Write(buf, binary.LittleEndian, uint32(value)); err != nil {
-						return err
-					}
+					binary.Write(buf, binary.LittleEndian, uint32(val))
 					ac.code = append(ac.code, buf.Bytes()...)
 					ac.ip += 4
 				}
-			} else {
-				value, err := ac.parseValue(arg)
-				if err != nil {
-					return err
-				}
+			} else { // imm или addr
 				buf := new(bytes.Buffer)
-				if argType == "addr" {
-					if value < 0 || value >= 65536 {
-						return fmt.Errorf("адрес превышает 64К: %s (Строка %d)", arg, lineNumber)
-					}
-					if err := binary.Write(buf, binary.LittleEndian, uint32(value)); err != nil {
-						return err
-					}
-				} else { // imm
-					if err := binary.Write(buf, binary.LittleEndian, int32(value)); err != nil {
-						return err
-					}
-				}
+				binary.Write(buf, binary.LittleEndian, uint32(val))
 				ac.code = append(ac.code, buf.Bytes()...)
 				ac.ip += 4
 			}
@@ -600,7 +484,7 @@ func (ac *AsmCompiler) compileLine(line string, lineNumber int) error {
 	return nil
 }
 
-// compile читает входной файл, обрабатывает строки, проводит два прохода и записывает байт-код.
+// compile читает входной файл, обрабатывает строки и записывает байт-код.
 func (ac *AsmCompiler) compile(inputFile, outputFile string) error {
 	file, err := os.Open(inputFile)
 	if err != nil {
@@ -610,30 +494,27 @@ func (ac *AsmCompiler) compile(inputFile, outputFile string) error {
 
 	var lines []string
 	scanner := bufio.NewScanner(file)
+	lineNumber := 0
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		lineNumber++
+		line := scanner.Text()
+		exLines, err := ac.expandLine(line, lineNumber)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, exLines...)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 
-	// Первый проход: расширяем псевдоинструкции.
-	var expanded []string
-	for i, line := range lines {
-		exLines, err := ac.expandLine(line, i+1)
-		if err != nil {
-			return err
-		}
-		expanded = append(expanded, exLines...)
-	}
-
-	// Первый проход: вычисление адресов меток.
+	ac.symbols = make(map[string]int)
 	codeOffset := 0
-	for i, line := range expanded {
+	for i, line := range lines {
 		label, instr := ac.preprocessLine(line)
 		if label != "" {
 			if _, exists := ac.symbols[label]; exists {
-				return fmt.Errorf("метка '%s' определена дважды (Строка %d)", label, i+1)
+				return fmt.Errorf("метка '%s' определена дважды (Строка ~%d)", label, i+1)
 			}
 			ac.symbols[label] = codeOffset
 		}
@@ -646,16 +527,14 @@ func (ac *AsmCompiler) compile(inputFile, outputFile string) error {
 		}
 	}
 
-	// Второй проход: генерация байт-кода.
 	ac.code = []byte{}
 	ac.ip = 0
-	for i, line := range expanded {
+	for i, line := range lines {
 		if err := ac.compileLine(line, i+1); err != nil {
-			return fmt.Errorf("ошибка в строке %d: %v", i+1, err)
+			return err
 		}
 	}
 
-	// Записываем заголовок (4-байтовый размер кода) и сам код в выходной файл.
 	outFile, err := os.Create(outputFile)
 	if err != nil {
 		return err
@@ -668,7 +547,7 @@ func (ac *AsmCompiler) compile(inputFile, outputFile string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Компиляция завершена. Байт-код сохранён в %s\n", outputFile)
+	fmt.Printf("Компиляция завершена. Байт-код (%d байт) сохранён в %s\n", len(ac.code), outputFile)
 	return nil
 }
 
@@ -686,4 +565,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

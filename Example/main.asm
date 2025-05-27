@@ -1,23 +1,5 @@
 ; =============================================================================
-; Полный демонстрационный пример для виртуальной машины (VM)
-; =============================================================================
-; В данном примере демонстрируются:
-; - Арифметические операции: LOADI, ADD, SUB, MUL, DIV
-; - Побитовые операции: AND, OR, XOR, NOT, SHL, SHR
-; - Условные переходы и циклы: CMP, IF
-; - Работа с памятью: LOAD, STORE
-; - Псевдоинструкция MOV с MOD (реализуется как DIV, MUL, SUB)
-; - Операции со стеком: PUSH, POP
-; - Инструкция MOVE для копирования регистров
-; - Сравнение (CMP) с условными переходами (IF EQ, IF NE)
-; - Вызов подпрограмм: CALL, RET (пример – рекурсивный факториал)
-; - Ввод/вывод: PRINT, PRINTS, INPUT (INPUT симулируется)
-; - Файловые операции: OPEN, READ, WRITE, SEEK, CLOSE (демонстрация через стандартный поток)
-; - Вывод списков файловой системы и переменных окружения: FS_LIST, ENV_LIST
-; - Снимок и восстановление состояния: SNAPSHOT, RESTORE
-; - Безусловный переход: JUMP
-; - Инструкции NOP и BREAK (отладочная точка)
-; - Завершение: HALT
+; Полный демонстрационный пример для виртуальной машины (VM) - ИСПРАВЛЕННЫЙ
 ; =============================================================================
 
 JUMP MAIN
@@ -51,6 +33,10 @@ MSG_MOVE:
 
 MSG_CMP:
     .ASCIIZ "CMP test (comparing 10 and 10):\n"
+MSG_CMP_NE:
+    .ASCIIZ "CMP test: Not Equal!\n"
+MSG_CMP_EQ:
+    .ASCIIZ "CMP test: Equal\n"
 
 MSG_CALL:
     .ASCIIZ "Subroutine test (factorial of 5):\n"
@@ -60,9 +46,14 @@ MSG_INPUT:
 
 MSG_INPUT_ECHO:
     .ASCIIZ "You entered: "
-    
+
 MSG_FILE:
     .ASCIIZ "File operations test (OPEN, WRITE, SEEK, CLOSE):\n"
+MSG_FILE_SIM:
+    .ASCIIZ "File operation simulated.\n"
+MSG_SEEK_SIM:
+    .ASCIIZ "File SEEK simulated.\n"
+
 
 MSG_FS:
     .ASCIIZ "Listing file system:\n"
@@ -71,10 +62,16 @@ MSG_ENV:
     .ASCIIZ "Listing environment variables:\n"
 
 MSG_SNAPSHOT:
-    .ASCIIZ "Snapshot & Restore test (R22 should revert to 0):\n"
+    .ASCIIZ "Snapshot & Restore test (R22 should be 0):\n"
+MSG_R22_5555:
+    .ASCIIZ "R22 is 5555. Restoring...\n"
+MSG_RESTORE_FINISH:
+    .ASCIIZ "Restore test finished.\n"
 
 MSG_JUMP:
     .ASCIIZ "Jump test: This block should be skipped.\n"
+MSG_SKIP:
+    .ASCIIZ "This message should NOT appear.\n"
 
 MSG_NOP_BREAK:
     .ASCIIZ "NOP and BREAK test. Press Enter to continue...\n"
@@ -98,9 +95,12 @@ FILE_TEST_MSG:
 
 ; Буферы для FS_LIST и ENV_LIST
 FS_LIST_BUFFER:
-    .SPACE 128
+    .SPACE 1024
 ENV_LIST_BUFFER:
-    .SPACE 128
+    .SPACE 1024
+
+MEM_VAR:
+    .SPACE 4 ; Место для переменной в памяти
 
 ; ========================
 ; Начало основной программы
@@ -112,124 +112,118 @@ MAIN:
 
     ; --- Test 1: Арифметические операции ---
     PRINTS MSG_ARITH
-    LOADI R0, 100           ; R0 = 100
-    LOADI R1, 25            ; R1 = 25
-    ADD   R2, R0, R1        ; R2 = 125
-    SUB   R3, R0, R1        ; R3 = 75
-    MUL   R4, R0, R1        ; R4 = 2500
-    DIV   R5, R0, R1        ; R5 = 4
-    PRINT R2                ; вывод 125
+    LOADI R0, 100
+    LOADI R1, 25
+    ADD   R2, R0, R1
+    SUB   R3, R0, R1
+    MUL   R4, R0, R1
+    DIV   R5, R0, R1
+    PRINT R2
     PRINTS NEWLINE
-    PRINT R3                ; вывод 75
+    PRINT R3
     PRINTS NEWLINE
-    PRINT R4                ; вывод 2500
+    PRINT R4
     PRINTS NEWLINE
-    PRINT R5                ; вывод 4
+    PRINT R5
     PRINTS NEWLINE
 
     ; --- Test 2: Побитовые операции ---
     PRINTS MSG_BITWISE
-    LOADI R6, 12            ; R6 = 12 (0b1100)
-    LOADI R7, 10            ; R7 = 10 (0b1010)
-    AND   R8, R6, R7        ; R8 = 8
-    OR    R9, R6, R7        ; R9 = 14
-    XOR   R10, R6, R7       ; R10 = 6
-    NOT   R11, R6           ; R11 = ~12, ожидается 4294967283
-    SHL   R12, R6, 2        ; R12 = 48
-    SHR   R13, R7, 1        ; R13 = 5
-    PRINT R8                ; 8
+    LOADI R6, 12
+    LOADI R7, 10
+    AND   R8, R6, R7
+    OR    R9, R6, R7
+    XOR   R10, R6, R7
+    NOT   R11, R6
+    SHL   R12, R6, 2
+    SHR   R13, R7, 1
+    PRINT R8
     PRINTS NEWLINE
-    PRINT R9                ; 14
+    PRINT R9
     PRINTS NEWLINE
-    PRINT R10               ; 6
+    PRINT R10
     PRINTS NEWLINE
-    PRINT R11               ; 4294967283
+    PRINT R11
     PRINTS NEWLINE
-    PRINT R12               ; 48
+    PRINT R12
     PRINTS NEWLINE
-    PRINT R13               ; 5
+    PRINT R13
     PRINTS NEWLINE
 
     ; --- Test 3: Цикл с условным переходом (CMP, IF) ---
     PRINTS MSG_LOOP
-    LOADI R14, 3           ; Счетчик = 3
+    LOADI R14, 3
 LOOP_LABEL:
-    PRINT R14              ; вывод текущего значения
+    PRINT R14
     PRINTS NEWLINE
-    LOADI R2, 1
-    SUB   R14, R14, R2     ; декремент
+    SUB   R14, R14, 1
     CMP   R14, 0
-    IF NE, LOOP_LABEL      ; повторяем цикл, пока не станет 0
+    IF NE, LOOP_LABEL
 
     ; --- Test 4: Псевдоинструкция MOV с MOD ---
     PRINTS MSG_MOV_MOD
-    LOADI R15, 22          ; R15 = 22
-    LOADI R16, 7           ; R16 = 7
-    MOV   R17, R15 MOD R16 ; R17 = 22 mod 7, ожидается 1
-    PRINT R17              ; вывод 1
+    LOADI R15, 22
+    LOADI R16, 7
+    MOV   R17, R15 MOD R16
+    PRINT R17
     PRINTS NEWLINE
 
     ; --- Test 5: Работа с памятью (STORE, LOAD) ---
     PRINTS MSG_MEMORY
-    LOADI R0, 600          ; адрес 600
-    LOADI R1, 777          ; значение 777
-    STORE R1, [R0]         ; сохраняем 777 по адресу 600
-    LOAD  R2, [R0]         ; читаем из памяти
-    PRINT R2               ; вывод 777
+    LOADI R0, MEM_VAR ; Используем метку для адреса
+    LOADI R1, 777
+    STORE R1, [R0]
+    LOAD  R2, [R0]
+    PRINT R2
     PRINTS NEWLINE
 
     ; --- Test 6: Операции со стеком (PUSH, POP) ---
     PRINTS MSG_STACK
     LOADI R3, 999
-    PUSH R3                ; помещаем 999 в стек
-    POP  R4                ; извлекаем значение
-    PRINT R4               ; вывод 999
+    PUSH R3
+    POP  R4
+    PRINT R4
     PRINTS NEWLINE
 
     ; --- Test 7: Инструкция MOVE (копирование) ---
     PRINTS MSG_MOVE
-    LOADI R13, 123         ; R13 = 123
-    MOVE  R14, R13         ; копируем R13 -> R14
-    PRINT R14              ; вывод 123
+    LOADI R13, 123
+    MOVE  R14, R13
+    PRINT R14
     PRINTS NEWLINE
 
     ; --- Test 8: Сравнение и условный переход (CMP, IF EQ) ---
     PRINTS MSG_CMP
     LOADI R15, 10
-    LOADI R16, 10
-    CMP   R15, R16         ; сравнение 10 и 10
+    CMP   R15, 10
     IF EQ, CMP_EQUAL
-    PRINTS "CMP test: Not Equal!\n"
+    PRINTS MSG_CMP_NE
     JUMP CMP_DONE
 CMP_EQUAL:
-    PRINTS "CMP test: Equal\n"
+    PRINTS MSG_CMP_EQ
 CMP_DONE:
     PRINTS NEWLINE
 
     ; --- Test 9: Вызов подпрограммы (CALL, RET) ---
     PRINTS MSG_CALL
-    LOADI R17, 5           ; число для факториала = 5
-    CALL FACTORIAL         ; результат в R1 (ожидается 120)
-    PRINT R1               ; вывод 120
+    LOADI R17, 5
+    CALL FACTORIAL
+    PRINT R1
     PRINTS NEWLINE
 
     ; --- Test 10: Ввод/вывод (INPUT, PRINT, PRINTS) ---
-    PRINTS MSG_INPUT       ; сообщение о вводе
-    ; Для демонстрации INPUT вместо ожидания ввода выводим симулированное значение
-    PRINTS SIMULATED_INPUT ; вывод "Simulated Input: 42\n"
+    PRINTS MSG_INPUT
+    PRINTS SIMULATED_INPUT
     PRINTS NEWLINE
 
     ; --- Test 11: Файловые операции (OPEN, WRITE, SEEK, CLOSE) ---
     PRINTS MSG_FILE
-    ; Демонстрация: откроем стандартный поток stdout
-    LOADI R20, STDOUT_STR   ; адрес строки "stdout"
-    LOADI R21, STDOUT_STR   ; используем тот же режим
-    OPEN  R22, R20, R21     ; открываем поток, дескриптор в R22
-    ; Симулируем запись (реальная запись не производится)
-    PRINTS "File operation simulated.\n"
-    ; Симулируем операцию SEEK
-    PRINTS "File SEEK simulated.\n"
-    CLOSE R22               ; закрываем поток
+    LOADI R20, STDOUT_STR
+    LOADI R21, STDOUT_STR
+    OPEN  R22, R20, R21
+    PRINTS MSG_FILE_SIM
+    PRINTS MSG_SEEK_SIM
+    CLOSE R22
     PRINTS NEWLINE
 
     ; --- Test 12: Вывод списка файловой системы и переменных окружения ---
@@ -243,37 +237,54 @@ CMP_DONE:
     PRINTS NEWLINE
 
     ; --- Test 13: Снимок и восстановление состояния (SNAPSHOT, RESTORE) ---
+    ; ИСПРАВЛЕННЫЙ ТЕСТ: Мы делаем снимок, меняем значение,
+    ; затем прыгаем, делаем RESTORE, и IP должен вернуться на
+    ; инструкцию ПОСЛЕ SNAPSHOT. Мы должны это обработать.
     PRINTS MSG_SNAPSHOT
-    SNAPSHOT               ; сохраняем состояние
-    LOADI R22, 5555        ; изменяем R22 (будет восстановлено)
-    RESTORE                ; восстанавливаем ранее сохранённое состояние
-    PRINT R22              ; вывод восстановленного R22 (ожидается 0)
+    LOADI R28, 0            ; Флаг восстановления: 0 = нет, 1 = да
+SNAPSHOT_ENTRY:
+    CMP R28, 1              ; Мы уже восстанавливались?
+    IF EQ, SNAPSHOT_FINISH  ; Если да, идем к концу теста.
+    ; Если нет (первый раз):
+    LOADI R22, 0            ; R22 = 0
+    SNAPSHOT                ; Сохраняем (R28=0, R22=0, IP -> LOADI R22, 5555)
+    LOADI R22, 5555         ; Меняем R22
+    PRINTS MSG_R22_5555
+    RESTORE                 ; Восстанавливаем (R28=0, R22=0, IP -> LOADI R22, 5555)
+    ; ВМ СЕЙЧАС ВЕРНЕТСЯ НА 'LOADI R22, 5555' ИЗ-ЗА ХАКА В ВМ.
+    ; НАМ НУЖНО ПРОПУСТИТЬ ЭТОТ ВЫЗОВ И RESTORE.
+    ; ПОСКОЛЬКУ IP НЕ ВОССТАНАВЛИВАЕТСЯ, МЫ ПРОСТО ПРОДОЛЖИМ.
+    ; НО R22 БУДЕТ 0.
+    PRINT R22               ; Выводим 0
     PRINTS NEWLINE
+    JUMP SNAPSHOT_FINISH    ; Прыгаем к концу теста
+
+SNAPSHOT_FINISH:
+    PRINTS MSG_RESTORE_FINISH
+    PRINTS NEWLINE
+
 
     ; --- Test 14: Демонстрация безусловного перехода (JUMP) ---
     PRINTS MSG_JUMP
-    JUMP SKIP_BLOCK        ; блок ниже не выполняется
-    PRINTS "This message should NOT appear.\n"
+    JUMP SKIP_BLOCK
+    PRINTS MSG_SKIP
     PRINTS NEWLINE
 
 SKIP_BLOCK:
     ; --- Test 15: Инструкции NOP и BREAK ---
     PRINTS MSG_NOP_BREAK
-    NOP                    ; без действия
-    BREAK                  ; точка останова для отладки (ожидание Enter)
-    HALT                   ; завершение программы
+    NOP
+    BREAK
+    HALT
 
 ; =============================================================================
 ; Подпрограмма: Факториал (рекурсивно)
-; Вычисляет факториал числа, находящегося в R17, результат возвращается в R1.
-; Используются стековые операции для сохранения промежуточных значений.
 ; =============================================================================
 FACTORIAL:
     CMP R17, 1
     IF EQ, FACT_RET
     PUSH R17
-    LOADI R2, 1
-    SUB R17, R17, R2
+    SUB R17, R17, 1
     CALL FACTORIAL
     POP R17
     MUL R1, R17, R1
@@ -281,4 +292,3 @@ FACTORIAL:
 FACT_RET:
     LOADI R1, 1
     RET
-
